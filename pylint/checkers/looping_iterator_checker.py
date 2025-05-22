@@ -26,6 +26,56 @@ class RepeatedLoopingIteratorChecker(BaseChecker):
     def visit_module(self, _:nodes.Module):
         self._iterator_lookup_dict.clear()
 
+    def _get_iterator_assign_node(
+            self, var_name: str, usage_scope: nodes.NodeNG
+    ) -> nodes.Assign | None:
+        """
+        Searches for the Assign node of a tracked exhaustible iterator variable.
+        Returns the astroid.nodes.Assign node or None.
+        """
+        current_search_scope: nodes.NodeNG | None = usage_scope
+        while current_search_scope:
+            lookup_key = (current_search_scope, var_name)
+            if lookup_key in self._iterator_lookup_dict:
+                _iterator_producing_node, assignment_node = self._iterator_lookup_dict[lookup_key]
+                return assignment_node
+            if not hasattr(current_search_scope, 'parent_scope') or \
+                    current_search_scope.parent_scope is current_search_scope:
+                break
+            current_search_scope = current_search_scope.parent_scope
+        return None
+
+    def _check_iterator_misuse_in_ancestor_loop(
+            self,
+            iterator_name_node: nodes.Name,
+            iterator_variable_name: str,
+            assignment_node_of_iterator: nodes.Assign,
+            usage_context_node: nodes.NodeNG
+    ) -> bool:
+        """
+        Checks if the given iterator is defined outside an ancestor loop
+        of usage_context_node where it's used/consumed. Adds a message if so.
+        Returns True if a message was added, False otherwise.
+        """
+        parent_walker = usage_context_node.parent
+        while parent_walker:
+            if isinstance(parent_walker, nodes.For):  # This is the ancestor loop
+                ancestor_loop_node = parent_walker
+                if not self._is_node_equal_or_descendant_of(
+                        assignment_node_of_iterator, ancestor_loop_node
+                ):
+                    self.add_message(
+                        "looping-through-iterator",
+                        node=iterator_name_node,
+                        args=(iterator_variable_name,),
+                        confidence=interfaces.HIGH,
+                    )
+                    return True  # Message added
+            if not hasattr(parent_walker, 'parent') or parent_walker.parent is parent_walker:
+                break
+            parent_walker = parent_walker.parent
+        return False  # No message added
+
 
     def visit_assign(self, assign_node: nodes.Assign):
         # check if generator expression is assigned to a variable
@@ -56,7 +106,51 @@ class RepeatedLoopingIteratorChecker(BaseChecker):
 
     def visit_for(self, for_node: nodes.For):
 
-        pass
+        for_exp_node = for_node.iter
+        if isinstance(for_exp_node, nodes.Name):
+            #variable name
+            iterator_name = for_exp_node.name
+            assignment_node = self._get_iterator_assign_node(iterator_name, for_exp_node.scope())
+            if assignment_node:
+                self._check_iterator_misuse_in_ancestor_loop(
+                    iterator_name_node=for_exp_node,
+                    iterator_variable_name=iterator_name,
+                    assignment_node_of_iterator=assignment_node,
+                    usage_context_node=for_node
+                )
 
-    def visit_call(self, func_node: nodes.Call):
-        pass
+    def visit_call(self, call_node: nodes.Call):
+
+        if isinstance(call_node.func, nodes.Name):
+            func_name = call_node.func.name
+            if func_name in self.itererator_consumers_one_time:
+                for arg_node in call_node.args:
+                    if isinstance(arg_node, nodes.Name):
+                        iterator_name = arg_node.name
+                        assignment_node = self._get_iterator_assign_node(iterator_name, arg_node.scope())
+                        if assignment_node:
+                            if self._check_iterator_misuse_in_ancestor_loop(
+                                    iterator_name_node=arg_node,
+                                    iterator_variable_name=iterator_name,
+                                    assignment_node_of_iterator=assignment_node,
+                                    usage_context_node=call_node
+                            ):
+                                return  # Message added for this argument, stop processing this call_node
+                        else:
+                            continue
+                    else:
+                        continue
+
+    def _is_node_equal_or_descendant_of(self, node: nodes.NodeNG, ancestor: nodes.NodeNG) -> bool:
+        current: nodes.NodeNG | None = node
+        while current:
+            if current == ancestor:
+                return True
+            if not hasattr(current, 'parent') or current.parent is current:
+                break
+            current = current.parent
+        return False
+
+
+def register(linter: PyLinter) -> None:
+    linter.register_checker(RepeatedLoopingIteratorChecker(linter))
