@@ -518,3 +518,14 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
         module_node = astroid.parse(code)
         with self.assertNoMessages():
             self.walk(module_node)
+
+    def test_list_call_in_loop(self):
+        code = """
+            for i in range(5):
+                iterator1 = (i for i in [1, 2, 3])
+                for j in list(iterator1):
+                    print("i ", i, "j ", j)
+        """
+        module_node = astroid.parse(code)
+        with self.assertNoMessages():
+            self.walk(module_node)

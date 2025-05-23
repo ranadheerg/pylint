@@ -113,23 +113,46 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
         return None
 
     def _check_iterator_misuse_in_ancestor_loop(
-        self,
-        iterator_name_node: nodes.Name,
-        iterator_variable_name: str,
-        assignment_node_of_iterator: nodes.Assign,
-        usage_context_node: nodes.NodeNG
+            self,
+            iterator_name_node: nodes.Name,
+            iterator_variable_name: str,
+            assignment_node_of_iterator: nodes.Assign,
+            usage_context_node: nodes.NodeNG,
+            # True if the usage is direct iteration (from visit_for),
+            # False if usage is a call consuming the iterator (from visit_call).
+            is_usage_direct_iteration: bool
     ) -> bool:
         """
         Checks if the given iterator is defined outside an ancestor loop
         of usage_context_node where it's used/consumed. Adds a message if so.
         Returns True if a message was added, False otherwise.
         """
+        # Start searching for an ancestor loop from the parent of the usage context.
+        # For visit_for, usage_context_node is the For loop itself (L_inner), so parent is L_outer.
+        # For visit_call, usage_context_node is the Call node (C1), so parent could be the For loop (L_j) for which C1 is the iterable.
         parent_walker = usage_context_node.parent
+
         while parent_walker:
-            if isinstance(parent_walker, nodes.For): # This is the ancestor loop
+            if isinstance(parent_walker, nodes.For):  # Found an ancestor loop
                 ancestor_loop_node = parent_walker
+
+                if not is_usage_direct_iteration:  # Called from visit_call
+                    # If the Call node (usage_context_node) is the .iter attribute of this ancestor_loop_node,
+                    # it means this loop (ancestor_loop_node) iterates over the *result* of the call.
+                    # This loop itself does not cause re-evaluation of the call with the same iterator.
+                    # We must look for a loop that is an ancestor of *this* ancestor_loop_node.
+                    if hasattr(ancestor_loop_node, "iter") and usage_context_node is ancestor_loop_node.iter:
+                        # Continue to the next parent, this loop isn't the one causing re-consumption by the call.
+                        if not hasattr(parent_walker, 'parent') or parent_walker.parent is parent_walker:
+                            break
+                        parent_walker = parent_walker.parent
+                        continue
+
+                # At this point, ancestor_loop_node is a loop that would re-execute
+                # the direct iteration (if is_usage_direct_iteration is True)
+                # or re-execute the call node (if is_usage_direct_iteration is False and the above 'continue' was not hit).
                 if not self._is_node_equal_or_descendant_of(
-                    assignment_node_of_iterator, ancestor_loop_node
+                        assignment_node_of_iterator, ancestor_loop_node
                 ):
                     self.add_message(
                         "looping-through-iterator",
@@ -137,11 +160,12 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
                         args=(iterator_variable_name,),
                         confidence=interfaces.HIGH,
                     )
-                    return True # Message added
+                    return True  # Message added
+
             if not hasattr(parent_walker, 'parent') or parent_walker.parent is parent_walker:
                 break
             parent_walker = parent_walker.parent
-        return False # No message added
+        return False  # No message added
 
     @utils.only_required_for_messages("looping-through-iterator")
     def visit_for(self, current_for_node: nodes.For) -> None:
@@ -161,7 +185,8 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
             iterator_name_node=iterated_expression_node,
             iterator_variable_name=iterator_variable_name,
             assignment_node_of_iterator=assignment_node_of_iterator,
-            usage_context_node=current_for_node
+            usage_context_node=current_for_node,
+            is_usage_direct_iteration=True
         )
 
     @utils.only_required_for_messages("looping-through-iterator")
@@ -188,7 +213,8 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
                 iterator_name_node=arg_node,
                 iterator_variable_name=iterator_variable_name,
                 assignment_node_of_iterator=assignment_node_of_iterator,
-                usage_context_node=call_node
+                usage_context_node=call_node,
+                is_usage_direct_iteration=False
             ):
                 return # Message added for this argument, stop processing this call_node
 
