@@ -12,31 +12,12 @@ import logging
 # Initialize logging (you might want to configure this more elaborately)
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-# Helper to check if a node is a descendant of another
-def is_node_descendant_of(node: nodes.NodeNG, ancestor_candidate: nodes.NodeNG) -> bool:
-    """
-    Check if `node` is a descendant of `ancestor_candidate`.
-    """
-    logging.debug(f"Checking if {node} is descendant of {ancestor_candidate}")
-    parent = node
-    while parent:
-        if parent == ancestor_candidate:
-            logging.debug(f"{node} is a descendant of {ancestor_candidate}")
-            return True
-        if not hasattr(parent, 'parent') or parent.parent is parent:
-            break
-        parent = parent.parent
-    logging.debug(f"{node} is not a descendant of {ancestor_candidate}")
-    return False
-
-
 class RepeatedlyLoopingIteratorChecker(BaseChecker):
     """
     Checks for repeatedly looping through the same exhaustible iterator instance.
     """
 
-    name = "repeatedly-looping-iterator"
+    name = "repeated_iterator_checker"
     MSG_ID = "W4801"
     msgs = {
         MSG_ID: (
@@ -63,6 +44,23 @@ class RepeatedlyLoopingIteratorChecker(BaseChecker):
         self._iterator_definitions = {}
         self._current_for_loops = []
         logging.debug("RepeatedlyLoopingIteratorChecker initialized")
+
+    # Helper to check if a node is a descendant of another
+    def is_node_descendant_of(node: nodes.NodeNG, ancestor_candidate: nodes.NodeNG) -> bool:
+        """
+        Check if `node` is a descendant of `ancestor_candidate`.
+        """
+        logging.debug(f"Checking if {node} is descendant of {ancestor_candidate}")
+        parent = node
+        while parent:
+            if parent == ancestor_candidate:
+                logging.debug(f"{node} is a descendant of {ancestor_candidate}")
+                return True
+            if not hasattr(parent, 'parent') or parent.parent is parent:
+                break
+            parent = parent.parent
+        logging.debug(f"{node} is not a descendant of {ancestor_candidate}")
+        return False
 
     def visit_module(self, _: nodes.Module) -> None:
         """Clear data for every module."""
