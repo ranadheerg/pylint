@@ -227,7 +227,7 @@ class RepeatedlyLoopingIteratorChecker(BaseChecker):
                     if id(current_for_node) == shared_usage_state['first_for_node_id']:
                         if len(self._current_for_loops) > 1:
                             parent_loop_node = self._current_for_loops[-2]
-                            if not is_node_descendant_of(definition_statement_node, parent_loop_node):
+                            if not self.is_node_descendant_of(definition_statement_node, parent_loop_node):
                                 self.add_message(
                                     self.MSG_ID,
                                     node=expr_node,
