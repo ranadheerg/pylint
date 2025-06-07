@@ -190,6 +190,46 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
             # So MessageTest should be line=6 for the node `iter_call_obj`
         # Re-evaluating line for iter_callable_sentinel
 
+    def test_warns_for_nested_consuming_producing_calls(self):
+        # The code to be linted
+        module_node = astroid.parse(
+            """
+            import string
+            iter1 = map(lambda x: x, string.printable)
+            iter2 = set(map(lambda x: x, string.printable))
+            for i in range(5):
+                for i1, i2 in list(zip(iter1, iter2)):
+                    print(i1, i2)
+            """
+        )
+
+        # To find the correct node, we must inspect the AST.
+        # inner_for_loop_node -> For(iter=<Call...>)
+        inner_for_loop_node = module_node.body[3].body[0]
+
+        # The .iter attribute is the `list(zip(iter1, iter2))` call
+        # Call(func=<Name.list...>, args=[<Call...>])
+        list_call_node = inner_for_loop_node.iter
+
+        # The argument to list() is the `zip(iter1, iter2)` call
+        # Call(func=<Name.zip...>, args=[<Name.iter1>, <Name.iter2>])
+        zip_call_node = list_call_node.args[0]
+
+        # The first argument to zip() is the 'iter1' Name node we want to flag
+        expected_message_node = zip_call_node.args[0]
+
+        # Assert that ONE message is added on the 'iter1' node with the correct argument
+        with self.assertAddsMessages(
+                MessageTest(
+                    msg_id="looping-through-iterator",
+                    node=expected_message_node,
+                    args=("iter1",),  # The name of the misused iterator
+                    confidence=interfaces.HIGH,
+                ),
+                ignore_position=True,
+        ):
+            self.walk(module_node)
+
 
     def test_warns_for_reversed_object(self):
         module_node = astroid.parse(
@@ -525,6 +565,18 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
                 iterator1 = (i for i in [1, 2, 3])
                 for j in list(iterator1):
                     print("i ", i, "j ", j)
+        """
+        module_node = astroid.parse(code)
+        with self.assertNoMessages():
+            self.walk(module_node)
+
+    def test_nested_call_in_loop(self):
+        code = """
+            iter1 = map(lambda x: x, list(i for i in [1,2,3,4,5]))
+            iter2 = set(map(lambda x: x, list(i for i in [1,2,3,4,5])))
+            for i1, i2 in zip(iter1, iter2):
+                for i in range(5):
+                    print(i1, i2, i)
         """
         module_node = astroid.parse(code)
         with self.assertNoMessages():
