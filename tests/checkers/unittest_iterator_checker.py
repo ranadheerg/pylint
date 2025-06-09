@@ -311,6 +311,31 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
         ):
             self.walk(module_node)
 
+    def test_nested_consumer_producer_calls(self):
+        module_node = astroid.parse(
+                    """
+                    iter1 = map(lambda x: x, range(5))
+                    for i in filter(lambda x: x % 2 == 0, map(lambda x: x, range(5))):
+                        for j, k in zip(iter1, iter(range(5))):
+                            print("i ", i, "j ", j, "k ", k)
+                    """
+                )
+        print("module node ", module_node.body[1])
+        outer_for_loop_node = module_node.body[1]
+        if not isinstance(outer_for_loop_node, (nodes.For, nodes.AsyncFor)):
+            raise AssertionError(f"Expected a For node, got {type(outer_for_loop_node)}")
+        print("outer_for_loop_node ", outer_for_loop_node)
+        print("outer_for_loop_node.body ", outer_for_loop_node.body[0])
+        inner_for_loop_node = outer_for_loop_node.body[0]
+        if not isinstance(inner_for_loop_node, (nodes.For, nodes.AsyncFor)):  # Check if it's a For node
+            raise AssertionError(f"Expected an inner For node, got {type(inner_for_loop_node)}")
+
+        expected_message_node = inner_for_loop_node.iter.args[0]
+        with self.assertAddsMessages(
+                MessageTest(msg_id="looping-through-iterator", node=expected_message_node, args=("iter1",),
+                            confidence=interfaces.HIGH), ignore_position=True
+        ):
+            self.walk(module_node)
 
     # --- Negative Cases ---
 
@@ -344,13 +369,13 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
                 )
             )
 
-    def test_no_warning_if_iterator_converted_to_list(self):
+    def test_no_warning_if_iterator_converted_to_set(self):
         with self.assertNoMessages():
             self.walk( # CHANGED HERE
                 astroid.parse(
                     """
                     gen_ex = (x for x in range(3))
-                    list_from_gen = list(gen_ex) # Converted to list
+                    list_from_gen = set(map(list(gen_ex))) # Converted to set after nested calls
                     for _i in range(2):
                         for item in list_from_gen:
                             print(item)
@@ -577,6 +602,18 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
             for i1, i2 in zip(iter1, iter2):
                 for i in range(5):
                     print(i1, i2, i)
+        """
+        module_node = astroid.parse(code)
+        with self.assertNoMessages():
+            self.walk(module_node)
+
+    def test_reassign_in_inner_loop(self):
+        code = """
+            iter1 = map(lambda x: x, range(5))
+            for i in filter(lambda x: x % 2 == 0, map(lambda x: x, range(5))):
+                iter1 = map(lambda x: x, range(5))
+                for j, k in zip(iter1, iter(range(5))):
+                    print("i ", i, "j ", j, "k ", k)
         """
         module_node = astroid.parse(code)
         with self.assertNoMessages():
