@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+import logging  # Added for debugging
+from typing import TYPE_CHECKING, Set
 
-from astroid import nodes
+from astroid import Uninferable, nodes
+from astroid.exceptions import InferenceError
 
 from pylint import checkers, interfaces
 from pylint.checkers import utils
@@ -17,141 +19,132 @@ if TYPE_CHECKING:
 
 class RepeatedIteratorLoopChecker(checkers.BaseChecker):
     """
-    Checks for exhaustible iterators that are looped over or consumed
-    repeatedly in a loop.
+    Checks for exhaustible iterators that are re-used in a nested loop.
     """
 
-    # FIX 1: The checker's 'name' is now distinct from the message symbol.
-    name = "reused-iterator-checker"
+    name = "repeated-iterator-loop"
     msgs = {
-        "W4802": (
-            "Iterator '%s' is re-used in a loop. It will likely be exhausted after the first iteration.",
-            "reused-iterator",  # This is the message symbol.
-            "Emitted when an exhaustible iterator (e.g., a generator, or the result of map(), "
-            "filter(), zip()) is defined outside of a loop and is used in a way that "
-            "would consume it on each iteration. This leads to unexpected empty results on "
-            "all but the first pass. To fix this, either convert the iterator to a list "
-            "before the loop if it needs to be reused, or re-create the iterator inside "
-            "the loop if a fresh one is needed each time.",
+        "W4801": (
+            "Iterator '%s' from an outer scope is re-used or consumed in a nested loop.",
+            "looping-through-iterator",
+            "...",
         )
     }
 
     options = ()
 
-    KNOWN_ITERATOR_PRODUCERS: Set[str] = {"map", "filter", "zip", "iter", "reversed"}
-    KNOWN_ITERATOR_CONSUMERS: Set[str] = {
+    KNOWN_ITERATOR_PRODUCING_FUNCTIONS: Set[str] = {
+        "map", "filter", "zip", "iter", "reversed"
+    }
+    KNOWN_ITERATOR_CONSUMING_FUNCTIONS: Set[str] = {
         "list", "tuple", "set", "sorted", "sum", "min", "max", "all", "any", "dict", "zip",
     }
 
-    def __init__(self, linter: PyLinter | None = None) -> None:
-        super().__init__(linter)
-        self._tracked_iterators: Dict[Tuple[nodes.NodeNG, str], nodes.Assign] = {}
-        self._flagged_in_loop_stack: List[Set[str]] = []
-
-    def visit_module(self, _: nodes.Module) -> None:
-        self._tracked_iterators.clear()
-        self._flagged_in_loop_stack.clear()
-
-    @utils.only_required_for_messages("reused-iterator")
-    def visit_assign(self, node: nodes.Assign) -> None:
-        if len(node.targets) != 1 or not isinstance(node.targets[0], nodes.AssignName):
-            return
-
-        target = node.targets[0]
-        key = (target.scope(), target.name)
-        value = node.value
-
-        is_iterator = isinstance(value, nodes.GeneratorExp) or (
-                isinstance(value, nodes.Call)
-                and isinstance(value.func, nodes.Name)
-                and value.func.name in self.KNOWN_ITERATOR_PRODUCERS
-        )
-
-        if is_iterator:
-            self._tracked_iterators[key] = node
-        elif key in self._tracked_iterators:
-            del self._tracked_iterators[key]
-
-    def _push_loop_scope(self, _: nodes.NodeNG) -> None:
-        self._flagged_in_loop_stack.append(set())
-
-    def _pop_loop_scope(self, _: nodes.NodeNG) -> None:
-        self._flagged_in_loop_stack.pop()
-
-    # Aliases for loop types that only need to manage the stack
-    visit_while = visit_listcomp = visit_setcomp = visit_dictcomp = visit_generatorexp = _push_loop_scope
-    leave_for = leave_while = leave_listcomp = leave_setcomp = leave_dictcomp = leave_generatorexp = _pop_loop_scope
-
-    def _find_iterator_assignment(self, name_node: nodes.Name) -> nodes.Assign | None:
-        scope = name_node.scope()
-        while scope:
-            key = (scope, name_node.name)
-            if key in self._tracked_iterators:
-                return self._tracked_iterators[key]
-            if not hasattr(scope, "parent") or scope is scope.parent:
-                break
-            scope = scope.parent
-        return None
-
-    @staticmethod
-    def _get_containing_loop(node: nodes.NodeNG) -> Optional[nodes.NodeNG]:
-        current = node.parent
+    def _is_node_descendant_of(
+            self, node: nodes.NodeNG, ancestor: nodes.NodeNG
+    ) -> bool:
+        """Checks if `node` is a descendant of or is the same as `ancestor`."""
+        current: nodes.NodeNG | None = node
         while current:
-            if isinstance(current,
-                          (nodes.For, nodes.While, nodes.ListComp, nodes.SetComp, nodes.DictComp, nodes.GeneratorExp)):
-                return current
-            if isinstance(current, (nodes.Module, nodes.FunctionDef, nodes.ClassDef)):
-                return None
-            current = current.parent
-        return None
-
-    def _check_iterator_usage(self, name_node: nodes.Name) -> None:
-        if not self._flagged_in_loop_stack:
-            return
-
-        var_name = name_node.name
-        flagged_set = self._flagged_in_loop_stack[-1]
-
-        if var_name in flagged_set:
-            return
-
-        assignment_node = self._find_iterator_assignment(name_node)
-        if not assignment_node:
-            return
-
-        containing_loop = self._get_containing_loop(name_node)
-        if not containing_loop:
-            return
-
-        current = assignment_node
-        is_defined_inside = False
-        while current:
-            if current == containing_loop:
-                is_defined_inside = True
+            if current == ancestor:
+                return True
+            if isinstance(current, (nodes.FunctionDef, nodes.ClassDef, nodes.Module)):
                 break
             current = current.parent
+        return False
 
-        if not is_defined_inside:
-            self.add_message("reused-iterator", node=name_node, args=(var_name,))
-            flagged_set.add(var_name)
+    def _check_usage_with_inference(
+            self,
+            iterator_name_node: nodes.Name,
+            usage_context_node: nodes.NodeNG
+    ) -> None:
+        """
+        Checks if the used iterator is defined outside an ancestor loop.
+        """
+        logging.debug("--- Checking usage of '%s' at line %s ---", iterator_name_node.name, iterator_name_node.lineno)
 
-    @utils.only_required_for_messages("reused-iterator")
+        # 1. Find the first ancestor `for` or `while` loop.
+        parent_walker = usage_context_node.parent
+        ancestor_loop_node: nodes.For | nodes.While | None = None
+        while parent_walker:
+            if isinstance(parent_walker, (nodes.For, nodes.While)):
+                ancestor_loop_node = parent_walker
+                break
+            if isinstance(parent_walker, (nodes.FunctionDef, nodes.ClassDef, nodes.Module)):
+                break
+            parent_walker = parent_walker.parent
+
+        if not ancestor_loop_node:
+            logging.debug("No ancestor For/While loop found. Aborting check.")
+            return
+        logging.debug("Ancestor loop found: %s", ancestor_loop_node.as_string())
+
+        # 2. Use inference to find where the iterator was defined.
+        try:
+            inferred_values = list(iterator_name_node.infer())
+            logging.debug("Inferred definitions for '%s': %r", iterator_name_node.name, inferred_values)
+
+            if not inferred_values or inferred_values[0] is Uninferable:
+                logging.debug("Inference failed or returned Uninferable. Aborting check.")
+                return
+
+            # 3. Check if *any* of the possible definitions cause a violation.
+            for definition_node in inferred_values:
+                logging.debug("... Analyzing definition: %r", definition_node)
+                is_iterator_definition = False
+                actual_definition_node = definition_node
+
+                if isinstance(definition_node, nodes.GeneratorExp):
+                    is_iterator_definition = True
+                elif (
+                        isinstance(definition_node, nodes.Call)
+                        and isinstance(definition_node.func, nodes.Name)
+                        and definition_node.func.name in self.KNOWN_ITERATOR_PRODUCING_FUNCTIONS
+                ):
+                    is_iterator_definition = True
+                elif isinstance(definition_node, nodes.AssignName):
+                    rhs = definition_node.parent.value
+                    if isinstance(rhs, nodes.GeneratorExp):
+                        is_iterator_definition = True
+                        actual_definition_node = rhs
+                    elif (isinstance(rhs, nodes.Call)
+                          and isinstance(rhs.func, nodes.Name)
+                          and rhs.func.name in self.KNOWN_ITERATOR_PRODUCING_FUNCTIONS):
+                        is_iterator_definition = True
+                        actual_definition_node = rhs
+
+                if not is_iterator_definition:
+                    logging.debug("... Not an iterator definition we track. Continuing.")
+                    continue
+
+                logging.debug("... Identified as an iterator definition. Checking position.")
+                is_descendant = self._is_node_descendant_of(actual_definition_node, ancestor_loop_node)
+                logging.debug("... Is definition a descendant of the loop? %s", is_descendant)
+
+                if not is_descendant:
+                    logging.debug(">>> VIOLATION FOUND! Firing message for '%s'!", iterator_name_node.name)
+                    self.add_message(
+                        "looping-through-iterator",
+                        node=iterator_name_node,
+                        args=(iterator_name_node.name,),
+                    )
+                    break
+        except InferenceError as e:
+            logging.debug("InferenceError occurred: %s. Aborting check.", e)
+            return
+
+    @utils.only_required_for_messages("looping-through-iterator")
     def visit_for(self, node: nodes.For) -> None:
-        """Checks for direct iteration over a tracked iterator."""
-        # FIX 2: Explicitly call _push_loop_scope here.
-        self._push_loop_scope(node)
         if isinstance(node.iter, nodes.Name):
-            self._check_iterator_usage(node.iter)
+            self._check_usage_with_inference(node.iter, usage_context_node=node)
 
-    @utils.only_required_for_messages("reused-iterator")
+    @utils.only_required_for_messages("looping-through-iterator")
     def visit_call(self, node: nodes.Call) -> None:
-        """Checks for consumption of a tracked iterator by a function call."""
-        if not (isinstance(node.func, nodes.Name) and node.func.name in self.KNOWN_ITERATOR_CONSUMERS):
-            return
-
-        for arg in node.args:
-            if isinstance(arg, nodes.Name):
-                self._check_iterator_usage(arg)
+        if (isinstance(node.func, nodes.Name)
+                and node.func.name in self.KNOWN_ITERATOR_CONSUMING_FUNCTIONS):
+            for arg in node.args:
+                if isinstance(arg, nodes.Name):
+                    self._check_usage_with_inference(arg, usage_context_node=node)
 
 
 def register(linter: PyLinter) -> None:

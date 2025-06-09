@@ -47,7 +47,7 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
                     confidence=interfaces.HIGH,
                 )
         ):
-            self.checker.visit_module(module_node) # Clears state
+            #self.checker.visit_module(module_node) # Clears state
             self.walk(module_node)
 
     def test_warns_for_map_object_global_scope(self):
