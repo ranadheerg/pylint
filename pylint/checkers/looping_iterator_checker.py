@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import logging  # Added for debugging
-from typing import TYPE_CHECKING, Set, Dict
+from typing import TYPE_CHECKING, Set, Dict, Union, List
 
 from astroid import Uninferable, nodes
 from astroid.exceptions import InferenceError
@@ -16,6 +16,7 @@ from pylint.checkers import utils
 if TYPE_CHECKING:
     from pylint.lint import PyLinter
 
+DefinitionType = Union[nodes.NodeNG, str]
 
 class RepeatedIteratorLoopChecker(checkers.BaseChecker):
     """
@@ -33,85 +34,106 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
 
     options = ()
 
-    KNOWN_ITERATOR_QUALIFIED_NAMES: Set[str] = {
-        "builtins.map", "builtins.filter", "builtins.zip", "builtins.iter", "builtins.reversed"
+    KNOWN_ITERATOR_PRODUCING_FUNCTIONS: Set[str] = {
+        "map", "filter", "zip", "iter", "reversed"
     }
 
-    # --- Reactive Triggers ---
+    def __init__(self, linter: PyLinter | None = None) -> None:
+        super().__init__(linter)
+        self._scope_stack: List[Dict[str, DefinitionType]] = []
+
+    # --- Scope Management ---
+
+    def visit_module(self, node: nodes.Module) -> None:
+        self._scope_stack = [{}]
+
+    def visit_functiondef(self, node: nodes.FunctionDef) -> None:
+        self._scope_stack.append({})
+
+    def leave_functiondef(self, node: nodes.FunctionDef) -> None:
+        self._scope_stack.pop()
+
+    def visit_for(self, node: nodes.For) -> None:
+        self._scope_stack.append({})
+        if isinstance(node.iter, nodes.Name):
+            self._check_variable_usage(node.iter)
+
+    def leave_for(self, node: nodes.For) -> None:
+        self._scope_stack.pop()
+
+    # --- State Building & Reactive Checks ---
 
     @utils.only_required_for_messages("looping-through-iterator")
-    def visit_for(self, node: nodes.For) -> None:
-        """This method is a reactive trigger. It's called for every `for` loop."""
-        if isinstance(node.iter, nodes.Name):
-            # The loop is `for ... in my_variable:`. We need to check `my_variable`.
-            self._check_iterator_usage(node.iter)
+    def visit_assign(self, node: nodes.Assign) -> None:
+        value_node = node.value
+        is_iterator_definition = False
+        if isinstance(value_node, nodes.GeneratorExp):
+            is_iterator_definition = True
+        elif (isinstance(value_node, nodes.Call)
+              and isinstance(value_node.func, nodes.Name)
+              and value_node.func.name in self.KNOWN_ITERATOR_PRODUCING_FUNCTIONS):
+            is_iterator_definition = True
+
+        current_scope = self._scope_stack[-1]
+        for target in node.targets:
+            if isinstance(target, nodes.AssignName):
+                variable_name = target.name
+                if is_iterator_definition:
+                    current_scope[variable_name] = value_node
+                else:
+                    current_scope[variable_name] = "SAFE"
+
+    @utils.only_required_for_messages("looping-through-iterator")
+    def visit_call(self, node: nodes.Call) -> None:
+        for arg in node.args:
+            if isinstance(arg, nodes.Name):
+                self._check_variable_usage(arg)
 
     # --- Core Logic ---
 
-    def _check_iterator_usage(self, iterator_name_node: nodes.Name) -> None:
+    def _check_variable_usage(self, usage_node: nodes.Name) -> None:
         """
-        This is the core of the checker. It uses inference to determine the
-        true nature and scope of the variable at the point of usage.
+        When a variable is used, this method checks if it is a re-used
+        exhaustible iterator inside a nested loop.
         """
-        iterator_name = iterator_name_node.name
-        print(f"DEBUG (Usage): --- Checking usage of '{iterator_name}' at line {iterator_name_node.lineno} ---")
+        iterator_name = usage_node.name
 
-        # 1. Find the loop directly containing the usage.
-        usage_loop = self._find_ancestor_loop(iterator_name_node)
-        if not usage_loop:
+        # 1. Find the true definition of this variable by searching our scope stack.
+        definition = None
+        for scope in reversed(self._scope_stack):
+            if iterator_name in scope:
+                definition = scope[iterator_name]
+                break
+
+        if not definition or definition == "SAFE":
             return
 
-        # 2. Find the loop that contains the usage_loop (the "outer" loop).
+        # 2. Find the loop where this usage occurs.
+        usage_loop = self._find_ancestor_loop(usage_node)
+        if not usage_loop:
+            return  # Not used inside any loop.
+
+        # 3. Find this loop's parent loop (if one exists).
         outer_loop = self._find_ancestor_loop(usage_loop.parent)
         if not outer_loop:
-            return  # This isn't a nested loop scenario we are checking.
+            # The usage is in a top-level loop, not a nested one. This is safe.
+            return
 
-        print(f"DEBUG (Usage): Nested loop detected. Inner at L{usage_loop.lineno}, Outer at L{outer_loop.lineno}")
+        # 4. We are in a nested loop. The code is only unsafe if the
+        #    iterator was defined OUTSIDE the outer loop.
+        is_defined_inside_outer_loop = self._is_node_descendant_of(definition, outer_loop)
 
-        # 3. Use INFERENCE to find the true definition of the variable at this exact spot.
-        #    This correctly handles shadowing and aliasing.
-        try:
-            inferred_values = list(iterator_name_node.infer())
-            if not inferred_values or inferred_values[0] is Uninferable:
-                print("DEBUG (Check): Inference failed. Cannot determine variable type.")
-                return
-
-            definition_node = inferred_values[0]
-            print(f"DEBUG (Check): Inferred definition is: {definition_node}")
-
-            # 4. Check if the inferred definition is an exhaustible iterator we care about.
-            is_exhaustible_iterator = False
-            if isinstance(definition_node, nodes.GeneratorExp):
-                is_exhaustible_iterator = True
-            elif hasattr(definition_node, "qname"):  # Check for map, filter, etc.
-                if definition_node.qname() in self.KNOWN_ITERATOR_QUALIFIED_NAMES:
-                    is_exhaustible_iterator = True
-
-            if not is_exhaustible_iterator:
-                print(f"DEBUG (Check): Inferred type is not an exhaustible iterator. Check passed.")
-                return
-
-            # 5. The variable is an iterator. Check if it was defined outside the outer loop.
-            is_defined_inside_outer_loop = self._is_node_descendant_of(definition_node, outer_loop)
-            print(
-                f"DEBUG (Position): Is '{iterator_name}' defined inside the outer loop? {is_defined_inside_outer_loop}")
-
-            if not is_defined_inside_outer_loop:
-                print(f"DEBUG (Position): >>> VIOLATION FOUND! Firing message for '{iterator_name}'! <<<")
-                self.add_message(
-                    "looping-through-iterator",
-                    node=iterator_name_node,
-                    args=(iterator_name,),
-                    confidence=interfaces.HIGH,
-                )
-
-        except InferenceError:
-            print("DEBUG (Check): InferenceError occurred.")
+        if not is_defined_inside_outer_loop:
+            self.add_message(
+                "looping-through-iterator",
+                node=usage_node,
+                args=(iterator_name,),
+                confidence=interfaces.HIGH,
+            )
 
     # --- Helper Methods ---
 
     def _find_ancestor_loop(self, node: nodes.NodeNG) -> nodes.For | nodes.While | None:
-        """Walks up the AST from a node to find the first containing loop."""
         current: nodes.NodeNG | None = node
         while current:
             if isinstance(current, (nodes.For, nodes.While)):
@@ -122,21 +144,16 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
         return None
 
     def _is_node_descendant_of(self, node: nodes.NodeNG, ancestor: nodes.NodeNG) -> bool:
-        """Checks if `node` is a descendant of or is the same as `ancestor`."""
-        # For inferred nodes that aren't part of the main tree (like builtins),
-        # they won't have a parent. They are implicitly global.
-        if not hasattr(node, "parent"):
-            return False
-
+        """Checks if a node is a child of an ancestor node."""
         current: nodes.NodeNG | None = node
         while current:
             if current == ancestor:
                 return True
-            if isinstance(current, (nodes.FunctionDef, nodes.ClassDef, nodes.Module)):
-                break  # Stop at boundaries
+            if not hasattr(current, "parent"):
+                # Handles special cases like inferred built-ins that have no parent
+                return False
             current = current.parent
         return False
-
 
 def register(linter: PyLinter) -> None:
     """This required function is called by Pylint to register the checker."""

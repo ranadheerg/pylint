@@ -3,7 +3,7 @@
 # for i in range(5):
 #     for i1, i2 in list(zip(iter1,iter2)):
 #         print(i1, i2)
-
+#
 # for i1, i2 in zip(iter1, iter2):
 #     for i in range(5):
 #         print(i1, i2, i)
@@ -12,7 +12,7 @@
 # for i in range(5):
 #     for i1 in iter1:
 #         print(i, i1)
-
+#
 # data = [1, 2, 3]
 # my_iter = iter(data)
 # # 'iter' is in KNOWN_ITERATOR_PRODUCING_FUNCTIONS
@@ -21,8 +21,8 @@
 #         print("a")
 #     for item in my_iter:
 #         print(item)
-#
-# # Iterator is defined once, outside the loop
+
+# Iterator is defined once, outside the loop
 # data_iterator = map(str, range(10))
 #
 # # An outer loop that will run multiple times
@@ -35,7 +35,7 @@
 #     current_data = zip(filter(lambda x: x != 2, data_iterator), data_iterator)  # <-- visit_call finds this!
 #
 #     print(current_data)
-#
+
 
 # import astroid
 #
@@ -103,14 +103,14 @@
 
 """test 7 using list and set"""
 
-iterator1 = list((ord(x) for x in "abc"))
-iterator2 = set((ord(x) for x in "aaa"))
-
-for spam in range(3):
-    for i1 , i2 in zip(iterator1, iterator2):
-        print("i1 ", chr(i1))
-        print("i2 ", chr(i2))
-        #print(chr(spam + i1), chr(spam + i2))
+# iterator1 = list((ord(x) for x in "abc"))
+# iterator2 = set((ord(x) for x in "aaa"))
+#
+# for spam in range(3):
+#     for i1 , i2 in zip(iterator1, iterator2):
+#         print("i1 ", chr(i1))
+#         print("i2 ", chr(i2))
+#         #print(chr(spam + i1), chr(spam + i2))
 
 """test 8 using same iterator multiple times"""
 
@@ -193,7 +193,7 @@ for spam in range(3):
 #             print("walked ", walked)
 
 """test9 full exhausted iterators with list, set calls"""
-# iterator1 = list((ord(x) for x in "abc"))
+# iterator1 = (ord(x) for x in "abc")
 # for spam in range(10):
 #     for eggs in iterator1:# this won't work as expected and is really hard to catch!
 #         # print("spam ", spam)
@@ -353,3 +353,24 @@ for spam in range(3):
 #     for j, k in zip(iter1, iter(range(5))):
 #         print("i ", i, "j ", j, "k ", k)
 
+# import string
+# print(len(string.printable))
+# iter1 = map(lambda x: x, string.printable)
+# iter2 = set(map(lambda x: x, string.printable))
+# cnt = 0
+# for i in range(5):
+#     for i1, i2 in list(zip(iter1, iter2)):
+#         cnt+=1
+#         #print(ord(i1), ord(i2))
+# print("Total iterations: ", cnt)
+
+# iter1 = map(lambda x: x, range(5))
+# for i in filter(lambda x: x % 2 == 0, map(lambda x: x, range(5))):
+#     for j, k in zip(iter1, iter(range(5))):
+#         print("i ", i, "j ", j, "k ", k)
+
+iter1 = map(lambda x: x, list(i for i in [1,2,3,4,5]))
+iter2 = set(map(lambda x: x, list(i for i in [1,2,3,4,5])))
+for i1, i2 in zip(iter1, iter2):
+    for i in range(5):
+        print(i1, i2, i)
