@@ -54,7 +54,15 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
         self._scope_stack.pop()
 
     def visit_for(self, node: nodes.For) -> None:
+        # The variables created by the for loop itself (e.g., `i` in `for i in ...`)
+        # are not iterators we need to track; they are the items. We mark them
+        # as "SAFE" in the current scope to prevent false positives.
+        for target in node.target.nodes_of_class(nodes.AssignName):
+            self._scope_stack[-1][target.name] = "SAFE"
+
+        # The body of the loop has its own new scope.
         self._scope_stack.append({})
+        # Now, check the iterator being looped over.
         if isinstance(node.iter, nodes.Name):
             self._check_variable_usage(node.iter)
 
@@ -108,22 +116,23 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
         if not definition or definition == "SAFE":
             return
 
-        # 2. Find the loop where this usage occurs.
-        usage_loop = self._find_ancestor_loop(usage_node)
-        if not usage_loop:
-            return  # Not used inside any loop.
+        # 2. Get all ancestor loops of the USAGE node.
+        ancestor_loops_of_usage = []
+        current: nodes.NodeNG | None = usage_node
+        while (loop := self._find_ancestor_loop(current)):
+            ancestor_loops_of_usage.append(loop)
+            current = loop.parent
 
-        # 3. Find this loop's parent loop (if one exists).
-        outer_loop = self._find_ancestor_loop(usage_loop.parent)
-        if not outer_loop:
-            # The usage is in a top-level loop, not a nested one. This is safe.
+        if len(ancestor_loops_of_usage) < 2:
+            # Usage is not in a nested loop, so it's safe.
             return
 
-        # 4. We are in a nested loop. The code is only unsafe if the
-        #    iterator was defined OUTSIDE the outer loop.
-        is_defined_inside_outer_loop = self._is_node_descendant_of(definition, outer_loop)
+        # 3. Get the loop that directly contains the DEFINITION.
+        definition_loop = self._find_ancestor_loop(definition)
 
-        if not is_defined_inside_outer_loop:
+        # 4. THE FINAL RULE: The usage is unsafe if the definition was not created
+        #    within one of the loops that contains the usage.
+        if definition_loop not in ancestor_loops_of_usage:
             self.add_message(
                 "looping-through-iterator",
                 node=usage_node,
@@ -134,6 +143,7 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
     # --- Helper Methods ---
 
     def _find_ancestor_loop(self, node: nodes.NodeNG) -> nodes.For | nodes.While | None:
+        """Walks up the AST from a node to find the first containing loop."""
         current: nodes.NodeNG | None = node
         while current:
             if isinstance(current, (nodes.For, nodes.While)):
@@ -142,18 +152,6 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
                 return None
             current = current.parent
         return None
-
-    def _is_node_descendant_of(self, node: nodes.NodeNG, ancestor: nodes.NodeNG) -> bool:
-        """Checks if a node is a child of an ancestor node."""
-        current: nodes.NodeNG | None = node
-        while current:
-            if current == ancestor:
-                return True
-            if not hasattr(current, "parent"):
-                # Handles special cases like inferred built-ins that have no parent
-                return False
-            current = current.parent
-        return False
 
 def register(linter: PyLinter) -> None:
     """This required function is called by Pylint to register the checker."""

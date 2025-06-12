@@ -1,3 +1,3 @@
 import os
 
-os.system("pylint debug_reproduce.py")
+os.system("pylint --enable=looping-through-iterator debug_reproduce_1.py")

@@ -337,6 +337,47 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
         ):
             self.walk(module_node)
 
+    def test_warns_for_iterator_stolen_by_nested_while_loop(self):
+        """
+        Tests for a true positive where an iterator is advanced by both an
+        outer loop and a nested while loop, causing items to be skipped.
+        """
+        module_node = astroid.parse("""
+        data_iterator = iter(range(20)) # Defined once, outside all loops
+        for i in range(5):
+            item = next(data_iterator)
+            print(f"Outer loop got: {item}")
+            while item < 10: # This nested while loop "steals" from the same iterator
+                item = next(data_iterator) # <-- WARNING on 'data_iterator'
+                print(f"  Inner loop got: {item}")
+                if item % 3 == 0:
+                    break
+        """)
+        print("module node ", module_node.body[1])
+        outer_for_loop_node = module_node.body[1]
+        if not isinstance(outer_for_loop_node, (nodes.For, nodes.AsyncFor)):
+            raise AssertionError(f"Expected a For node, got {type(outer_for_loop_node)}")
+        print("outer_for_loop_node ", outer_for_loop_node)
+        print("outer_for_loop_node.body ", outer_for_loop_node.body[0])
+        while_loop_node = outer_for_loop_node.body[2]
+        if not isinstance(while_loop_node, nodes.While):  # Check if it's a For node
+            raise AssertionError(f"Expected an inner For node, got {type(while_loop_node)}")
+        assignment_node = while_loop_node.body[0]
+        # 4. Get the right-hand side of the assignment (the 'next(...)' call)
+        call_node = assignment_node.value
+        # 5. Get the FIRST ARGUMENT to that call, which is 'data_iterator'
+        expected_message_node = call_node.args[0]
+        # The usage of `data_iterator` on line 8 is a violation.
+        with self.assertAddsMessages(
+                MessageTest(
+                    msg_id="looping-through-iterator",
+                    node = expected_message_node,
+                    args=("data_iterator",),
+                    confidence=interfaces.HIGH), ignore_position=True
+
+                ):
+            self.walk(module_node)
+
     # --- Negative Cases ---
 
     def test_no_warning_if_iterator_defined_inside_outer_loop(self):
@@ -618,3 +659,57 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
         module_node = astroid.parse(code)
         with self.assertNoMessages():
             self.walk(module_node)
+
+    # A test case for a valid pattern that was previously a false positive.
+    # The iterator `my_iter` is safely re-initialized on every pass of the
+    # outer loop, so its use in the nested loop is correct.
+
+    def test_iterator_reinitialized_in_outer_loop_is_safe(self):
+        code = """
+        for i in range(2):
+            data = [10, 20, 30, 40]
+            my_iter = iter(data)  # Re-initialized on every outer loop pass
+            for j in range(2):
+                # This is a valid use, not a re-use of a stale iterator
+                print(i, j, next(my_iter))
+        """
+        # This test MUST assert that no messages are added.
+        with self.assertNoMessages():
+            self.walk(astroid.parse(code))
+
+    # A test case for a valid pattern with deep nesting that was previously a false positive.
+    # The iterator `my_iter` is safely re-initialized on every pass of the
+    # outer loop, so its use in the deeply nested loop is correct.
+
+    def test_iterator_in_deeply_nested_loop_is_safe(self):
+        code = """
+        for i in range(2):  # Outer loop
+            my_iter = iter([10, 20])  # Iterator defined inside the outer loop
+            for j in range(2):         # First level of nesting
+                print(f"j={j}")
+                # The usage is in a second level of nesting
+                for item in my_iter:
+                    print(f"  i={i}, item={item}")
+                # Crucially, my_iter is now exhausted for this pass of the outer loop.
+        """
+        # The old, buggy checker would incorrectly flag the usage of `my_iter`
+        # on line 6. The new, correct checker should not.
+        with self.assertNoMessages():
+            self.walk(astroid.parse(code))
+
+    def test_no_warning_for_iterator_reinitialized_in_loop(self):
+        """
+        Tests that no warning is raised for the valid pattern where an
+        iterator is re-initialized on each pass of the outer loop.
+        """
+        code = """
+        responses = {"a": [1, 2], "b": [3, 4]}
+        for source, results in responses.items():
+            # The iterator is created FRESH on each outer loop pass. This is safe.
+            results_iter = iter(results)
+            for i in range(2):
+                item = next(results_iter)
+                print(source, i, item)
+        """
+        with self.assertNoMessages():
+            self.walk(astroid.parse(code))
