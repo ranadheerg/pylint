@@ -23,6 +23,7 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
     Checks for exhaustible iterators that are re-used in a nested loop.
     """
 
+
     name = "looping-through-iterator"
     msgs = {
         "W4801": (
