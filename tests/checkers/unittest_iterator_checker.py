@@ -713,3 +713,13 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
         """
         with self.assertNoMessages():
             self.walk(astroid.parse(code))
+
+    def test_no_warning_gen_producer_call_directly_in_loop(self):
+        code = """
+                my_list = [1, 2, 3]
+                for _i in range(4):
+                    for item in map(lambda x:x, my_list): # <-- Warning here
+                        print(item)
+                """
+        with self.assertNoMessages():
+            self.walk(astroid.parse(code))
