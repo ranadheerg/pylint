@@ -36,7 +36,7 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
     options = ()
 
     KNOWN_ITERATOR_PRODUCING_FUNCTIONS: Set[str] = {
-        "map", "filter", "zip", "iter", "reversed"
+        "builtins.map", "builtins.filter", "builtins.zip", "builtins.iter", "builtins.reversed"
     }
 
     def __init__(self, linter: PyLinter | None = None) -> None:
@@ -78,10 +78,12 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
         is_iterator_definition = False
         if isinstance(value_node, nodes.GeneratorExp):
             is_iterator_definition = True
-        elif (isinstance(value_node, nodes.Call)
-              and isinstance(value_node.func, nodes.Name)
-              and value_node.func.name in self.KNOWN_ITERATOR_PRODUCING_FUNCTIONS):
-            is_iterator_definition = True
+        elif isinstance(value_node, nodes.Call):
+            # Use `safe_infer` for a robust check of the function being called
+            inferred_func = utils.safe_infer(value_node.func)
+            if inferred_func and hasattr(inferred_func, "qname"):
+                if inferred_func.qname() in self.KNOWN_ITERATOR_PRODUCING_FUNCTIONS:
+                    is_iterator_definition = True
 
         current_scope = self._scope_stack[-1]
         for target in node.targets:
