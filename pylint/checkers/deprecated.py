@@ -97,6 +97,7 @@ class DeprecatedMixin(BaseChecker):
         "deprecated-method",
         "deprecated-argument",
         "deprecated-class",
+        "deprecated-module",
     )
     def visit_call(self, node: nodes.Call) -> None:
         """Called when a :class:`nodes.Call` node is visited."""
@@ -104,6 +105,15 @@ class DeprecatedMixin(BaseChecker):
         for inferred in infer_all(node.func):
             # Calling entry point for deprecation check logic.
             self.check_deprecated_method(node, inferred)
+
+            if (
+                isinstance(inferred, nodes.FunctionDef)
+                and inferred.qname() == "builtins.__import__"
+                and len(node.args) == 1
+                and (mod_path_node := utils.safe_infer(node.args[0]))
+                and isinstance(mod_path_node, astroid.Const)
+            ):
+                self.check_deprecated_module(node, mod_path_node.value)
 
     @utils.only_required_for_messages(
         "deprecated-module",
@@ -280,9 +290,6 @@ class DeprecatedMixin(BaseChecker):
 
     def check_deprecated_class_in_call(self, node: nodes.Call) -> None:
         """Checks if call the deprecated class."""
-        if isinstance(node.func, nodes.Attribute) and isinstance(
-            node.func.expr, nodes.Name
-        ):
-            mod_name = node.func.expr.name
-            class_name = node.func.attrname
-            self.check_deprecated_class(node, mod_name, (class_name,))
+        match node.func:
+            case nodes.Attribute(expr=nodes.Name(name=mod_name), attrname=class_name):
+                self.check_deprecated_class(node, mod_name, (class_name,))

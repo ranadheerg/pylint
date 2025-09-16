@@ -282,19 +282,11 @@ class CodeStyleChecker(BaseChecker):
         if prev_sibling is None or prev_sibling.tolineno - prev_sibling.fromlineno != 0:
             return False
 
-        if (
-            isinstance(prev_sibling, nodes.Assign)
-            and len(prev_sibling.targets) == 1
-            and isinstance(prev_sibling.targets[0], nodes.AssignName)
-            and prev_sibling.targets[0].name == name
-        ):
-            return True
-        if (
-            isinstance(prev_sibling, nodes.AnnAssign)
-            and isinstance(prev_sibling.target, nodes.AssignName)
-            and prev_sibling.target.name == name
-        ):
-            return True
+        match prev_sibling:
+            case nodes.Assign(
+                targets=[nodes.AssignName(name=target_name)]
+            ) | nodes.AnnAssign(target=nodes.AssignName(name=target_name)):
+                return target_name == name  # type: ignore[no-any-return]
         return False
 
     @staticmethod
@@ -316,21 +308,11 @@ class CodeStyleChecker(BaseChecker):
                 # separate if block
                 next_if_node = next_sibling
 
-            if (  # pylint: disable=too-many-boolean-expressions
-                next_if_node is not None
-                and (
-                    (
-                        isinstance(next_if_node.test, nodes.Compare)
-                        and isinstance(next_if_node.test.left, nodes.Name)
-                        and next_if_node.test.left.name == name
-                    )
-                    or (
-                        isinstance(next_if_node.test, nodes.Name)
-                        and next_if_node.test.name == name
-                    )
-                )
-            ):
-                return True
+            match next_if_node:
+                case nodes.If(
+                    test=nodes.Compare(left=nodes.Name(name=n)) | nodes.Name(name=n)
+                ) if (n == name):
+                    return True
         return False
 
     @only_required_for_messages("consider-using-augmented-assign")

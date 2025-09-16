@@ -109,6 +109,10 @@
     "mails": ["62866982+SupImDos@users.noreply.github.com"],
     "name": "Hayden Richards"
   },
+  "6644187+moylop260@users.noreply.github.com": {
+    "mails": ["6644187+moylop260@users.noreply.github.com", "moylop260@vauxoo.com"],
+    "name": "Moisés Lopez"
+  },
   "74228962+tanvimoharir@users.noreply.github.com": {
     "comment": ": Fix for invalid toml config",
     "mails": ["74228962+tanvimoharir@users.noreply.github.com"],
@@ -277,6 +281,7 @@
     "mails": [
       "66853113+pre-commit-ci[bot]@users.noreply.github.com",
       "49699333+dependabot[bot]@users.noreply.github.com",
+      "212256041+pylint-backport-bot[bot]@users.noreply.github.com",
       "41898282+github-actions[bot]@users.noreply.github.com"
     ],
     "name": "bot"
