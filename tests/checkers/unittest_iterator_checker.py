@@ -510,7 +510,159 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
         ):
             self.walk(module_node)
 
+    def test_no_warning_for_loop_with_unconditional_return(self):
+        """
+        Tests that a false positive is avoided when a nested loop pattern
+        is used, but the outer loop is guaranteed to exit via a top-level
+        'return' statement, making the pattern safe.
+        """
+        # This code contains the pattern that looks like a violation but is safe.
+        # We wrap it in a function to make the 'return' statement syntactically valid.
+        module_node = astroid.parse(
+            """
+            class FieldError(Exception): pass
+            sources_iter = iter(range(10))
+
+            def get_field(sources_iter):
+                for output_field in sources_iter:
+                    # The inner loop consumes the rest of the iterator
+                    for source in sources_iter:
+                        if not isinstance(output_field, source.__class__):
+                            raise FieldError("Mixed types")
+                    # This 'return' guarantees the outer loop only runs once.
+                    # Therefore, no warning should be emitted.
+                    return output_field
+                return None
+            """
+        )
+
+        # Use a context manager that asserts that NO messages are added.
+        # This is the standard way to test for the successful suppression of a warning.
+        with self.assertNoMessages():
+            # Run the checker on the entire parsed module.
+            self.walk(module_node)
+
+    def test_warns_when_exit_is_only_conditional(self):
+        """
+        Tests that a warning IS raised when an exit is not guaranteed
+        by an 'if' statement that lacks an 'else' block.
+        """
+        module_node = astroid.parse(
+            """
+            my_iter = iter(range(10))
+            for i in range(5):
+                if i == 0:
+                    # This inner loop exhausts the iterator on the first run.
+                    for item in my_iter:
+                        print(item)
+
+                if i == 4:
+                    # This exit is conditional and doesn't prevent the bug
+                    # on the second iteration (i=1).
+                    return
+            """
+        )
+
+        # Navigate the AST to find the specific 'my_iter' node in the inner loop.
+        outer_for_loop_node = module_node.body[1]
+        if_block_node = outer_for_loop_node.body[0]
+        inner_for_loop_node = if_block_node.body[0]
+        expected_message_node = inner_for_loop_node.iter  # This is the 'my_iter' Name node.
+
+        # Assert that a message is added on the identified node.
+        with self.assertAddsMessages(
+                MessageTest(
+                    msg_id="looping-through-iterator",
+                    node=expected_message_node,
+                    args=("my_iter",),
+                    confidence=interfaces.HIGH,
+                ),
+                ignore_position=True,
+        ):
+            self.walk(module_node)
+
+    def test_warns_when_stopiteration_is_caught_but_loop_continues(self):
+        """
+        Tests that a warning IS raised if StopIteration is caught but
+        the function does not exit, allowing the buggy reuse to be attempted.
+        """
+        module_node = astroid.parse(
+            """
+            source_iter = iter(range(10))
+            for i in range(2):
+                try:
+                    # On the first pass (i=0), this exhausts the iterator.
+                    for item in source_iter:
+                        print(item)
+                except StopIteration:
+                    # The bug: we catch the error but don't exit the outer loop.
+                    print("Iterator finished, but loop continues...")
+            """
+        )
+
+        # Navigate the AST to find the 'source_iter' node in the inner loop.
+        outer_for_loop_node = module_node.body[1]
+        try_block_node = outer_for_loop_node.body[0]
+        inner_for_loop_node = try_block_node.body[0]
+        expected_message_node = inner_for_loop_node.iter  # This is the 'source_iter' Name node.
+
+        # Assert that a message is added on the identified node.
+        with self.assertAddsMessages(
+                MessageTest(
+                    msg_id="looping-through-iterator",
+                    node=expected_message_node,
+                    args=("source_iter",),
+                    confidence=interfaces.HIGH,
+                ),
+                ignore_position=True,
+        ):
+            self.walk(module_node)
+
+
     # --- Negative Cases ---
+    def test_no_warning_return_inner_loop(self):
+        with self.assertNoMessages():
+            self.walk(  # CHANGED HERE
+                astroid.parse(
+                    """
+                   def my_func():
+                        sources_iter = (1, 2, 3)
+                        for output_field in sources_iter:
+                            for source in sources_iter: # This is a false positive
+                                return output_field
+                    """
+                )
+            )
+
+    def test_no_warning_break_inner_loop(self):
+        with self.assertNoMessages():
+            self.walk(  # CHANGED HERE
+                astroid.parse(
+                    """
+                    def my_func():
+                        sources_iter = (1, 2, 3)
+                        for output_field in sources_iter:
+                            for source in sources_iter:
+                                if source == 2:
+                                    break
+                                print(source)
+                    """
+                )
+            )
+    def test_no_warning_break_outer_loop(self):
+        with self.assertNoMessages():
+            self.walk(  # CHANGED HERE
+                astroid.parse(
+                    """
+                   def my_func():
+                        sources_iter = (1, 2, 3)
+                        for output_field in sources_iter:
+                            for source in sources_iter: # This is a false positive
+                                 return output_field
+                    """
+                )
+            )
+
 
     def test_no_warning_if_iterator_defined_inside_outer_loop(self):
         with self.assertNoMessages():
@@ -854,3 +1006,60 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
                 """
         with self.assertNoMessages():
             self.walk(astroid.parse(code))
+
+    def test_no_warning_stop_iteration(self):
+        code = """
+                        def simple_generator():
+    
+                            print("Generator started...")
+                            yield 0
+                            yield 1
+                            yield 2
+                            print("Generator finished.")
+                        
+                        # Create the generator object
+                        my_gen = simple_generator()
+                        
+                        print("Starting the loop...")
+                        while True:
+                            try:
+                                # Get the next item from the generator
+                                item = next(my_gen)
+                                print(f"Received: {item}")
+                            except StopIteration:
+                                # This block runs when the generator is exhausted
+                                print("Caught StopIteration. Exiting the loop.")
+                                break
+                        
+                        print("Loop finished.")
+                        """
+        with self.assertNoMessages():
+            self.walk(astroid.parse(code))
+
+    def test_no_warning_for_iterator_consumed_by_nested_while(self):
+        """
+        Tests that no warning is raised for an iterator that is correctly
+        consumed by a nested 'while' loop using 'next()'. This mimics the
+        pattern found in Django's 'add_extra' method.
+        """
+        # The 'with' statement asserts that the code inside it
+        # should produce zero messages from our checker.
+        with self.assertNoMessages():
+            self.walk(
+                astroid.parse(
+                    """
+                    def process_queries(queries, params):
+                        param_iter = iter(params)
+                        processed_queries = []
+                        # Outer loop iterates through query strings
+                        for query_string in queries:
+                            query_params = []
+                            # Nested while loop consumes the 'param_iter' iterator
+                            while "%s" in query_string:
+                                query_params.append(next(param_iter))
+                                query_string = query_string.replace("%s", "?", 1)
+                            processed_queries.append((query_string, query_params))
+                        return processed_queries
+                    """
+                )
+            )
