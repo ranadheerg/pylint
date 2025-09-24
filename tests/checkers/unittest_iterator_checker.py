@@ -618,6 +618,107 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
         ):
             self.walk(module_node)
 
+    def test_warns_for_if_else_with_only_one_branch_exiting(self):
+        """
+        Tests that a warning IS raised when an 'if' branch exits
+        but the 'else' branch does not, as the exit is not guaranteed.
+        """
+        code = """
+        my_iter = iter(range(10))
+        for i in range(2): # Bug triggers on second iteration (i=1)
+            for item in my_iter: # Exhausts iterator on first pass
+                pass
+            if i == 0:
+                print("First pass, breaking.")
+                break
+            else:
+                # This path doesn't exit, so the warning should be raised.
+                print("Second pass, no break.")
+        """
+        # Find the node for the message
+        module = astroid.parse(code)
+        inner_for = module.body[1].body[0]
+        expected_node = inner_for.iter
+
+        with self.assertAddsMessages(
+                MessageTest(
+                    msg_id="looping-through-iterator",
+                    node=expected_node,
+                    args=("my_iter",),
+                    confidence=interfaces.HIGH,
+                ),
+                ignore_position=True,
+        ):
+            self.walk(module)
+
+    def test_warns_for_try_except_with_non_exiting_handler(self):
+        """
+        Tests that a warning IS raised when a 'try' block exits but one
+        of its 'except' handlers does not.
+        """
+        code = """
+        my_iter = iter(range(10))
+        for i in range(2): # Bug triggers on second iteration
+            try:
+                for item in my_iter:
+                    if i > 0:
+                        raise ValueError
+                return # The 'try' block exits
+            except ValueError:
+                # This handler does NOT exit, making the overall
+                # block unsafe, so a warning should be raised.
+                print("Caught error, but continuing loop.")
+        """
+        module = astroid.parse(code)
+        try_node = module.body[1].body[0]
+        inner_for = try_node.body[0]
+        expected_node = inner_for.iter
+
+        with self.assertAddsMessages(
+                MessageTest(
+                    msg_id="looping-through-iterator",
+                    node=expected_node,
+                    args=("my_iter",),
+                    confidence=interfaces.HIGH,
+                ),
+                ignore_position=True,
+        ):
+            self.walk(module)
+
+    def test_warns_for_try_finally_without_exit(self):
+        """
+        Tests that a warning IS raised when a 'finally' block exists
+        but does not contain an exit, as the buggy pattern is still present.
+        """
+        code = """
+        my_iter = iter(range(10))
+        for i in range(2): # The bug occurs on the second iteration (i=1)
+            try:
+                # This inner loop exhausts the iterator on the first pass.
+                for item in my_iter:
+                    pass
+            finally:
+                # This 'finally' block cleans up but does NOT exit the
+                # outer loop, so the warning should still be raised.
+                print("Cleanup done.")
+        """
+        # Navigate the AST to find the specific 'my_iter' node in the inner loop.
+        module = astroid.parse(code)
+        outer_for_loop = module.body[1]
+        try_block = outer_for_loop.body[0]
+        inner_for_loop = try_block.body[0]
+        expected_message_node = inner_for_loop.iter
+
+        with self.assertAddsMessages(
+                MessageTest(
+                    msg_id="looping-through-iterator",
+                    node=expected_message_node,
+                    args=("my_iter",),
+                    confidence=interfaces.HIGH
+                ),
+                ignore_position=True,
+        ):
+            self.walk(module)
 
     # --- Negative Cases ---
     def test_no_warning_return_inner_loop(self):
@@ -1063,3 +1164,42 @@ class TestRepeatedIteratorLoopChecker(CheckerTestCase):
                     """
                 )
             )
+
+    def test_no_warning_for_if_else_with_guaranteed_exit(self):
+        """
+        Tests that no warning is raised when both the 'if' and 'else'
+        branches of a statement guarantee an exit from the loop.
+        """
+        code = """
+        my_iter = iter(range(10))
+        for i in range(2):
+            for item in my_iter:
+                print(item)
+            # The new logic should see that no matter the condition,
+            # the loop will exit, making this pattern safe.
+            if i == 0:
+                break
+            else:
+                return
+        """
+        with self.assertNoMessages():
+            self.walk(astroid.parse(code))
+
+    def test_no_warning_for_try_finally_with_exit(self):
+        """
+        Tests that no warning is raised when a 'finally' block
+        guarantees an exit from the loop.
+        """
+        code = """
+        my_iter = iter(range(10))
+        for i in range(2):
+            try:
+                for item in my_iter:
+                    print(item)
+            finally:
+                # An exit in a 'finally' block is always unconditional.
+                break
+        """
+        with self.assertNoMessages():
+            self.walk(astroid.parse(code))
+
