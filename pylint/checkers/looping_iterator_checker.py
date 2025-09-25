@@ -14,7 +14,7 @@ from pylint.checkers import utils
 if TYPE_CHECKING:
     from pylint.lint import PyLinter
 
-DefinitionType = Union[nodes.NodeNG, str]
+DefinitionType = nodes.NodeNG | str
 LOOP_NODES = (nodes.For, nodes.While, nodes.ListComp, nodes.SetComp, nodes.DictComp, nodes.GeneratorExp)
 
 
