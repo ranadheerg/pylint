@@ -89,33 +89,75 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
             if isinstance(arg, nodes.Name):
                 self._check_variable_usage(arg)
 
+    # In your RepeatedIteratorLoopChecker class:
+
+    from astroid import nodes
+
     def _has_unconditional_exit(self, statements: list[nodes.NodeNG]) -> bool:
-        for stmt in statements:
-            if isinstance(stmt, (nodes.Return, nodes.Break, nodes.Raise)):
-                return True
-            if isinstance(stmt, nodes.If):
-                if stmt.orelse and self._has_unconditional_exit(
-                        stmt.body
-                ) and self._has_unconditional_exit(stmt.orelse):
-                    return True
-            if isinstance(stmt, nodes.Try):
-                if stmt.finalbody and self._has_unconditional_exit(stmt.finalbody):
-                    return True
-                if not stmt.handlers:
-                    continue
-                try_body_exits = self._has_unconditional_exit(stmt.body)
-                if not try_body_exits:
-                    continue
-                all_handlers_exit = all(
-                    self._has_unconditional_exit(handler.body) for handler in stmt.handlers
-                )
-                if all_handlers_exit:
+        """
+        Iteratively checks if a sequence of statements has a guaranteed exit.
+
+        This function simulates the control flow by maintaining a queue of
+        paths that need to be checked. It returns True only if it can prove
+        that every possible path terminates unconditionally.
+        """
+        # Each item in the queue is an iterator over a list of statements
+        # representing a possible path of execution.
+        queue = [iter(statements)]
+
+        while queue:
+            path_iterator = queue.pop(0)
+
+            for stmt in path_iterator:
+                if isinstance(stmt, (nodes.Return, nodes.Break, nodes.Raise)):
+                    # This path has a guaranteed exit. We can stop checking it.
+                    # Continue to the next path in the queue.
+                    break
+
+                if isinstance(stmt, nodes.If):
+                    if not stmt.orelse:
+                        # An 'if' without 'else' creates a path that may not
+                        # be taken, so the exit is not guaranteed.
+                        return False
+
+                    # This path splits. The rest of the current path must be
+                    # appended to BOTH the 'if' and 'else' branches.
+                    remaining_path = list(path_iterator)
+                    queue.append(iter(stmt.body + remaining_path))
+                    queue.append(iter(stmt.orelse + remaining_path))
+
+                    # We've replaced the current path with its two sub-paths,
+                    # so we break this loop and let the main while-loop handle them.
+                    break
+
+                if isinstance(stmt, nodes.Try):
+                    # This is the fully iterative logic for a 'try' block.
+                    remaining_path = list(path_iterator)
+                    finally_path = stmt.finalbody or []
+
+                    # Define all the paths that can be taken before 'finally'.
+                    # If there are no handlers and no 'finally', it's not a guaranteed exit.
+                    if not stmt.handlers and not stmt.finalbody:
+                        return False
+
+                    sub_paths_before_finally = [stmt.body] + [h.body for h in stmt.handlers]
                     if stmt.orelse:
-                        if self._has_unconditional_exit(stmt.orelse):
-                            return True
-                    else:
-                        return True
-        return False
+                        sub_paths_before_finally.append(stmt.orelse)
+
+                    # Each sub-path must be combined with the 'finally' block
+                    # and the rest of the original path.
+                    for sub_path in sub_paths_before_finally:
+                        new_path = iter(sub_path + finally_path + remaining_path)
+                        queue.append(new_path)
+                    break
+            else:
+                # If the 'for' loop completes without breaking, it means this path
+                # finished without hitting an exit. Not guaranteed.
+                return False
+
+        # If the queue becomes empty, it means every path we explored
+        # was successfully terminated by an exit statement.
+        return True
 
     def _is_used_outside_nested_node(
             self, outer_loop: nodes.For | nodes.While,
