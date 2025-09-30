@@ -196,18 +196,6 @@ class RepeatedIteratorLoopChecker(checkers.BaseChecker):
         inner_loop = ancestor_loops[0]
         outer_loop = ancestor_loops[1]
 
-        # FINAL FIX: The logic must be combined. We must check for the "parser"
-        # pattern BEFORE we check for other unconditional exits.
-        is_in_next_call = (
-                isinstance(usage_node.parent, nodes.Call) and
-                isinstance(usage_node.parent.func, nodes.Name) and
-                usage_node.parent.func.name == "next"
-        )
-        if is_in_next_call:
-            if not self._is_used_outside_nested_node(outer_loop, inner_loop, iterator_name):
-                # This is the "parser" pattern. It's safe. Do not proceed.
-                return
-
         if not isinstance(outer_loop, (nodes.For, nodes.While)):
             return
 
