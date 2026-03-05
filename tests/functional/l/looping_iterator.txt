@@ -1,0 +1,12 @@
+looping-through-iterator:10:20:10:26:generator_expression_global_scope:Iterator 'gen_ex' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:17:20:17:27:map_object_global_scope:Iterator 'map_obj' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:24:20:24:30:filter_object_global_scope:Iterator 'filter_obj' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:31:20:31:27:zip_object_global_scope:Iterator 'zip_obj' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:39:20:39:28:iter_object_global_scope:Iterator 'iter_obj' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:53:20:53:33:iter_callable_sentinel_global_scope:Iterator 'iter_call_obj' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:63:31:63:36:nested_consuming_producing_calls:Iterator 'iter1' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:72:20:72:27:reversed_object_global_scope:Iterator 'rev_obj' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:80:24:80:30:iterator_defined_in_func_before_outer_loop.func:Iterator 'gen_ex' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:90:24:90:30:multiple_levels_of_nesting:Iterator 'gen_ex' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:97:24:97:29:nested_consumer_producer_calls:Iterator 'iter1' from an outer scope is re-used or consumed in a nested loop.:HIGH
+looping-through-iterator:106:24:106:37:iterator_stolen_by_nested_while_loop:Iterator 'data_iterator' from an outer scope is re-used or consumed in a nested loop.:HIGH

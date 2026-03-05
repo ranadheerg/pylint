@@ -7,8 +7,7 @@ from __future__ import annotations
 import logging  # Added for debugging
 from typing import TYPE_CHECKING, Set, Dict, Union, List
 
-from astroid import Uninferable, nodes
-from astroid.exceptions import InferenceError
+from astroid import nodes
 
 from pylint import checkers, interfaces
 from pylint.checkers import utils
