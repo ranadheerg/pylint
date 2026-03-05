@@ -53,6 +53,7 @@ All messages in the error category:
    error/assigning-non-slot
    error/assignment-from-no-return
    error/assignment-from-none
+   error/async-context-manager-with-regular-with
    error/await-outside-async
    error/bad-configuration-section
    error/bad-except-order
@@ -100,6 +101,7 @@ All messages in the error category:
    error/invalid-index-returned
    error/invalid-length-hint-returned
    error/invalid-length-returned
+   error/invalid-match-args-definition
    error/invalid-metaclass
    error/invalid-repr-returned
    error/invalid-sequence-index
@@ -123,6 +125,7 @@ All messages in the error category:
    error/mixed-format-string
    error/modified-iterating-dict
    error/modified-iterating-set
+   error/multiple-class-sub-patterns
    error/no-member
    error/no-method-argument
    error/no-name-in-module
@@ -157,6 +160,7 @@ All messages in the error category:
    error/too-few-format-args
    error/too-many-format-args
    error/too-many-function-args
+   error/too-many-positional-sub-patterns
    error/too-many-star-expressions
    error/truncated-format-string
    error/undefined-all-variable
@@ -487,6 +491,7 @@ All messages in the refactor category:
    refactor/condition-evals-to-constant
    refactor/confusing-consecutive-elif
    refactor/consider-alternative-union-syntax
+   refactor/consider-math-not-float
    refactor/consider-merging-isinstance
    refactor/consider-refactoring-into-while-condition
    refactor/consider-swap-variables
@@ -514,6 +519,8 @@ All messages in the refactor category:
    refactor/inconsistent-return-statements
    refactor/literal-comparison
    refactor/magic-value-comparison
+   refactor/match-class-bind-self
+   refactor/match-class-positional-attributes
    refactor/no-classmethod-decorator
    refactor/no-else-break
    refactor/no-else-continue

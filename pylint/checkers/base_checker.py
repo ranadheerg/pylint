@@ -126,7 +126,7 @@ class BaseChecker(_ArgumentsProvider):
         if msgs:
             result += get_rst_title(f"{checker_title} Messages", "^")
             for msgid, msg in sorted(
-                msgs.items(), key=lambda kv: (_MSG_ORDER.index(kv[0][0]), kv[1])
+                msgs.items(), key=lambda kv: (_MSG_ORDER.index(kv[0][0]), kv[0])
             ):
                 msg_def = self.create_message_definition_from_tuple(msgid, msg)
                 result += f"{msg_def.format_help(checkerref=False)}\n"
@@ -188,10 +188,10 @@ class BaseChecker(_ArgumentsProvider):
             default_scope = WarningScope.NODE
         options: ExtraMessageOptions = {}
         if len(msg_tuple) == 4:
-            (msg, symbol, descr, msg_options) = msg_tuple
+            msg, symbol, descr, msg_options = msg_tuple
             options = ExtraMessageOptions(**msg_options)
         elif len(msg_tuple) == 3:
-            (msg, symbol, descr) = msg_tuple
+            msg, symbol, descr = msg_tuple
         else:
             error_msg = """Messages should have a msgid, a symbol and a description. Something like this :
 

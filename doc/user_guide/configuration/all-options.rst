@@ -8,6 +8,7 @@
 Standard Checkers
 ^^^^^^^^^^^^^^^^^
 
+Remember that only ``tool.pylint`` is required, the section title is not. There are specific notes under each example that cover this.
 
 .. _main-options:
 
@@ -492,6 +493,13 @@ Standard Checkers
 **Default:**  ``re.compile('^_')``
 
 
+--paramspec-rgx
+"""""""""""""""
+*Regular expression matching correct parameter specification variable names. If left empty, parameter specification variable names will be checked with the set naming style.*
+
+**Default:**  ``None``
+
+
 --property-classes
 """"""""""""""""""
 *List of decorators that produce properties, such as abc.abstractproperty. Add to this list to register other decorators that produce valid properties. These decorators are taken in consideration only for invalid-name.*
@@ -509,6 +517,13 @@ Standard Checkers
 --typevar-rgx
 """""""""""""
 *Regular expression matching correct type variable names. If left empty, type variable names will be checked with the set naming style.*
+
+**Default:**  ``None``
+
+
+--typevartuple-rgx
+""""""""""""""""""
+*Regular expression matching correct type variable tuple names. If left empty, type variable tuple names will be checked with the set naming style.*
 
 **Default:**  ``None``
 
@@ -604,11 +619,15 @@ Standard Checkers
 
    no-docstring-rgx = "^_"
 
+   # paramspec-rgx =
+
    property-classes = ["abc.abstractproperty"]
 
    # typealias-rgx =
 
    # typevar-rgx =
+
+   # typevartuple-rgx =
 
    # Possible choices: ['snake_case', 'camelCase', 'PascalCase', 'UPPER_CASE', 'any']
    variable-naming-style = "snake_case"
@@ -1023,6 +1042,13 @@ Standard Checkers
 **Default:**  ``()``
 
 
+--known-first-party
+"""""""""""""""""""
+*Force import order to recognize a module as part of a first party library.*
+
+**Default:**  ``()``
+
+
 --known-third-party
 """""""""""""""""""
 *Force import order to recognize a module as part of a third party library.*
@@ -1063,6 +1089,8 @@ Standard Checkers
    int-import-graph = ""
 
    known-standard-library = []
+
+   known-first-party = []
 
    known-third-party = ["enchant"]
 
