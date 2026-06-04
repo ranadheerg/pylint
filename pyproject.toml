@@ -39,7 +39,7 @@ dependencies = [
   # Also upgrade test-min dependency group and requirements_test_min.txt.
   # Pinned to dev of second minor update to allow editable installs and fix primer issues,
   # see https://github.com/pylint-dev/astroid/issues/1341
-  "astroid>=4.1.1,<=4.2.0b1",
+  "astroid>=4.2.0b3,<=4.3",
   "colorama>=0.4.5; sys_platform=='win32'",
   "dill>=0.2; python_version<'3.11'",
   "dill>=0.3.6; python_version>='3.11'",
@@ -57,9 +57,9 @@ urls."Bug Tracker" = "https://github.com/pylint-dev/pylint/issues"
 urls."Discord Server" = "https://discord.com/invite/Egy6P8AMB5"
 urls."Docs: Contributor Guide" = "https://pylint.readthedocs.io/en/latest/development_guide/contributor_guide/index.html"
 urls."Docs: User Guide" = "https://pylint.readthedocs.io/en/latest/"
+urls.homepage = "https://github.com/pylint-dev/pylint"
 urls."Source Code" = "https://github.com/pylint-dev/pylint"
 urls."What's New" = "https://pylint.readthedocs.io/en/latest/whatsnew/4/"
-urls.homepage = "https://github.com/pylint-dev/pylint"
 scripts.pylint = "pylint:run_pylint"
 scripts.pylint-config = "pylint:_run_pylint_config"
 scripts.pyreverse = "pylint:run_pyreverse"
@@ -88,7 +88,7 @@ docs = [
 # Configuration for the build system
 test-min = [
   # Base test dependencies
-  "astroid==4.1.2",                     # Pinned to a specific version for tests
+  "astroid==4.2.0b3",                   # Pinned to a specific version for tests
   "py~=1.11.0",
   "pytest>=8.4,<10",
   "pytest-benchmark~=5.1",
@@ -128,6 +128,7 @@ lint.select = [
   "PIE", # flake8-pie
   "PTH", # flake8-pathlib
   "PYI", # flake8-pyi
+  "RET", # flake8-return
   "RUF", # ruff
   "UP",  # pyupgrade
   "W",   # pycodestyle
@@ -203,6 +204,24 @@ skip = """\
 [tool.pyproject-fmt]
 max_supported_python = "3.14"
 
+[tool.pytest]
+ini_options.testpaths = [ "tests" ]
+ini_options.python_files = [ "*test_*.py" ]
+ini_options.addopts = "--strict-markers"
+ini_options.filterwarnings = [
+  "error",
+  # Added in Python 3.14
+  "ignore:'break' in a 'finally' block:SyntaxWarning",
+  "ignore:'return' in a 'finally' block:SyntaxWarning",
+  "ignore:'continue' in a 'finally' block:SyntaxWarning",
+]
+ini_options.markers = [
+  "primer_stdlib: Checks for crashes and errors when running pylint on stdlib",
+  "benchmark: Baseline of pylint performance, if this regress something serious happened",
+  "timeout: Marks from pytest-timeout.",
+  "needs_two_cores: Checks that need 2 or more cores to be meaningful",
+]
+
 [tool.mypy]
 scripts_are_modules = true
 warn_unused_ignores = true
@@ -242,33 +261,15 @@ include = [
 ]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
-reportMissingImports = "none"  # pytest / astroid are not detected
-reportOptionalMemberAccess = "none"  # 150 issues
-reportArgumentType = "none"  # 12 issues
-reportAttributeAccessIssue = "none"  # 11 issues
-reportInvalidTypeForm = "none"  # 6 issues
-reportOptionalCall = "none"  # 2 issues
-reportGeneralTypeIssues = "none"  # 1 issue
-reportCallIssue = "none"  # 1 issue
-reportInvalidTypeVarUse = "none"  # 2 warnings
-
-[tool.pytest]
-ini_options.testpaths = [ "tests" ]
-ini_options.python_files = [ "*test_*.py" ]
-ini_options.addopts = "--strict-markers"
-ini_options.filterwarnings = [
-  "error",
-  # Added in Python 3.14
-  "ignore:'break' in a 'finally' block:SyntaxWarning",
-  "ignore:'return' in a 'finally' block:SyntaxWarning",
-  "ignore:'continue' in a 'finally' block:SyntaxWarning",
-]
-ini_options.markers = [
-  "primer_stdlib: Checks for crashes and errors when running pylint on stdlib",
-  "benchmark: Baseline of pylint performance, if this regress something serious happened",
-  "timeout: Marks from pytest-timeout.",
-  "needs_two_cores: Checks that need 2 or more cores to be meaningful",
-]
+reportMissingImports = "none" # pytest / astroid are not detected
+reportOptionalMemberAccess = "none" # 150 issues
+reportArgumentType = "none" # 12 issues
+reportAttributeAccessIssue = "none" # 11 issues
+reportInvalidTypeForm = "none" # 6 issues
+reportOptionalCall = "none" # 2 issues
+reportGeneralTypeIssues = "none" # 1 issue
+reportCallIssue = "none" # 1 issue
+reportInvalidTypeVarUse = "none" # 2 warnings
 
 [tool.aliases]
 test = "pytest"
