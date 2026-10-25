@@ -60,6 +60,13 @@ class RecommendationChecker(checkers.BaseChecker):
             "which could potentially be an f-string. The use of f-strings is preferred. "
             "Requires Python 3.6 and ``py-version >= 3.6``.",
         ),
+        "C0210": (
+            "Consider using %s instead of manually incrementing a counter",
+            "consider-using-enumerate-counter",
+            "Emitted when a counter initialized before a for loop is incremented "
+            "by one on every iteration. Such code can be simplified by using the "
+            "enumerate builtin.",
+        ),
     }
 
     def open(self) -> None:
@@ -178,11 +185,13 @@ class RecommendationChecker(checkers.BaseChecker):
 
     @utils.only_required_for_messages(
         "consider-using-enumerate",
+        "consider-using-enumerate-counter",
         "consider-using-dict-items",
         "use-sequence-for-iteration",
     )
     def visit_for(self, node: nodes.For) -> None:
         self._check_consider_using_enumerate(node)
+        self._check_consider_using_enumerate_counter(node)
         self._check_consider_using_dict_items(node)
         self._check_use_sequence_for_iteration(node)
 
@@ -265,6 +274,124 @@ class RecommendationChecker(checkers.BaseChecker):
                 ):
                     self.add_message("consider-using-enumerate", node=node)
                     return
+
+    def _check_consider_using_enumerate_counter(self, node: nodes.For) -> None:
+        """Emit a convention when a counter is manually incremented in a for loop.
+
+        i = 0
+        for case in cases:
+            i += 1
+            ...
+        """
+        # The increment must be unconditional, so it has to be the first or the
+        # last statement of the body. Anywhere else, the statements before it
+        # see a different value than the ones after it.
+        increment = node.body[0]
+        counter = self._get_incremented_counter(increment)
+        if counter is None:
+            increment = node.body[-1]
+            counter = self._get_incremented_counter(increment)
+            if counter is None:
+                return
+            # ``continue`` would skip an increment placed at the end of the body
+            if any(
+                node.nodes_of_class(
+                    nodes.Continue,
+                    skip_klass=(nodes.For, nodes.While, nodes.FunctionDef),
+                )
+            ):
+                return
+        increment_is_first = increment is node.body[0]
+
+        start = self._get_counter_start(node, counter)
+        if start is None:
+            return
+
+        # The increment must be the only write to the counter in the loop
+        increment_target = (
+            increment.target
+            if isinstance(increment, nodes.AugAssign)
+            else increment.targets[0]
+        )
+        for assign in node.nodes_of_class((nodes.AssignName, nodes.DelName)):
+            if assign.name == counter and assign is not increment_target:
+                return
+
+        # The counter must only be read in the body of the loop. After the loop,
+        # its value differs from the one ``enumerate`` would leave behind.
+        scope = node.scope()
+        for global_node in scope.nodes_of_class((nodes.Global, nodes.Nonlocal)):
+            if counter in global_node.names:
+                return
+        for name in scope.nodes_of_class(nodes.Name):
+            if name.name == counter and not any(
+                stmt.parent_of(name) for stmt in node.body
+            ):
+                return
+
+        if increment_is_first:
+            start += 1
+        suggestion = f"enumerate({node.iter.as_string()}"
+        suggestion += f", start={start})" if start else ")"
+        self.add_message(
+            "consider-using-enumerate-counter",
+            node=node,
+            args=(suggestion,),
+            confidence=HIGH,
+        )
+
+    @staticmethod
+    def _get_incremented_counter(node: nodes.NodeNG) -> str | None:
+        """Return the name of the variable incremented by one in ``node``, if any.
+
+        Matches ``i += 1``, ``i = i + 1`` and ``i = 1 + i``.
+        """
+        match node:
+            case nodes.AugAssign(
+                op="+=", target=nodes.AssignName(name=name), value=nodes.Const()
+            ):
+                step = node.value
+            case nodes.Assign(
+                targets=[nodes.AssignName(name=name)],
+                value=nodes.BinOp(op="+", left=left, right=right),
+            ):
+                match (left, right):
+                    case (nodes.Name(name=operand), nodes.Const() as step) | (
+                        nodes.Const() as step,
+                        nodes.Name(name=operand),
+                    ) if operand == name:
+                        pass
+                    case _:
+                        return None
+            case _:
+                return None
+        # ``True`` and ``1.0`` compare equal to ``1``
+        if type(step.value) is not int or step.value != 1:
+            return None
+        return name  # type: ignore[no-any-return]
+
+    @staticmethod
+    def _get_counter_start(node: nodes.For, counter: str) -> int | None:
+        """Return the integer the counter is initialized to before the loop.
+
+        Statements between the initialization and the loop are allowed as long
+        as they do not use the counter.
+        """
+        stmt = node.previous_sibling()
+        while stmt is not None:
+            match stmt:
+                case nodes.Assign(
+                    targets=[nodes.AssignName(name=name)],
+                    value=nodes.Const(value=int() as start),
+                ) if name == counter and not isinstance(start, bool):
+                    return start
+            if any(
+                child.name == counter
+                for child in stmt.nodes_of_class((nodes.Name, nodes.AssignName))
+            ):
+                return None
+            stmt = stmt.previous_sibling()
+        return None
 
     def _check_consider_using_dict_items(self, node: nodes.For) -> None:
         """Add message when accessing dict values by index lookup."""

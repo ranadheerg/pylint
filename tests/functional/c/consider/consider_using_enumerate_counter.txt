@@ -1,0 +1,11 @@
+consider-using-enumerate-counter:15:4:17:22:increment_first:Consider using enumerate(all_possible_cases, start=1) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:22:4:24:14:increment_last:Consider using enumerate(ITEMS) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:29:4:31:22:increment_with_binop:Consider using enumerate(ITEMS, start=1) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:36:4:38:17:increment_with_reversed_binop:Consider using enumerate(ITEMS) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:43:4:45:14:non_zero_start:Consider using enumerate(ITEMS, start=10) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:50:4:52:28:tuple_target:"Consider using enumerate({'a': 1}.items(), start=1) instead of manually incrementing a counter":HIGH
+consider-using-enumerate-counter:57:4:61:22:continue_with_increment_first:Consider using enumerate(ITEMS, start=1) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:66:4:70:22:break_with_increment_first:Consider using enumerate(ITEMS, start=1) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:75:4:80:14:continue_in_nested_loop_with_increment_last:Consider using enumerate(ITEMS) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:86:4:88:29:statement_between_unrelated:Consider using enumerate(ITEMS, start=1) instead of manually incrementing a counter:HIGH
+consider-using-enumerate-counter:92:0:94:10::Consider using enumerate(ITEMS) instead of manually incrementing a counter:HIGH
