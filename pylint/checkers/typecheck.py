@@ -534,11 +534,12 @@ def _emit_no_member(
     #   * Check if condition can be inferred as `Const`,
     #       would evaluate as `False`,
     #       and whether the node is part of the `body`.
-    #   * Continue checking until scope of node is reached.
-    scope: nodes.NodeNG = node.scope()
+    #   * Continue checking until frame of node is reached: a comprehension
+    #       runs in the branch that contains it.
+    frame: nodes.NodeNG = node.frame()
     node_origin: nodes.NodeNG = node
     parent: nodes.NodeNG = node.parent
-    while parent != scope:
+    while parent != frame:
         if isinstance(parent, (nodes.If, nodes.IfExp)):
             inferred = safe_infer(parent.test)
             if (  # pylint: disable=too-many-boolean-expressions
@@ -594,8 +595,8 @@ def _enum_has_attribute(
             while enum_def is not None and not isinstance(enum_def, nodes.ClassDef):
                 enum_def = enum_def.parent
 
-        # If this blows, something is clearly wrong
-        assert enum_def is not None, "enum_def unexpectedly None"
+        if enum_def is None:
+            return False
     else:
         enum_def = owner
 
@@ -619,7 +620,12 @@ def _enum_has_attribute(
             )
 
     # Find attributes defined in __init__
-    if dunder_init and dunder_init.body and dunder_init.args:
+    if (
+        dunder_init
+        and dunder_init.body
+        and dunder_init.args
+        and dunder_init.args.arguments
+    ):
         # Grab the name referring to `self` from the function def
         enum_attributes |= _get_all_attribute_assignments(
             dunder_init, dunder_init.args.arguments[0].name
@@ -713,6 +719,20 @@ def _has_parent_of_type(
     while not isinstance(parent, node_type) and statement.parent_of(parent):
         parent = parent.parent
     return isinstance(parent, node_type)
+
+
+def _returns_first_argument(func: nodes.FunctionDef) -> bool:
+    """Return whether every return of ``func`` is its own first parameter."""
+    params = (func.args.posonlyargs or []) + (func.args.args or [])
+    if not params:
+        return False
+    first_param = params[0]
+    returns = list(func.nodes_of_class(nodes.Return, skip_klass=nodes.FunctionDef))
+    return bool(returns) and all(
+        isinstance(ret.value, nodes.Name)
+        and ret.value.lookup(ret.value.name)[1] == [first_param]
+        for ret in returns
+    )
 
 
 def _no_context_variadic_keywords(node: nodes.Call, scope: nodes.Lambda) -> bool:
@@ -1206,10 +1226,13 @@ accessed. Python regular expressions are accepted.",
 
             try:
                 attr_nodes = owner.getattr(node.attrname)
-            except AttributeError:
+            except (AttributeError, astroid.DuplicateBasesError):
                 continue
-            except astroid.DuplicateBasesError:
-                continue
+            except astroid.InferenceError:
+                # Nothing is known about this owner, so it may have the
+                # attribute: judging the other inferred owners alone would
+                # emit a false positive, bail out as for opaque inference.
+                return
             except astroid.NotFoundError:
                 # Avoid false positive in case a decorator supplies member.
                 if (
@@ -1459,7 +1482,7 @@ accessed. Python regular expressions are accepted.",
 
         try:
             attrs = klass._proxied.getattr(node.func.attrname)
-        except astroid.NotFoundError:
+        except (astroid.NotFoundError, astroid.InferenceError):
             return
 
         for attr in attrs:
@@ -1748,15 +1771,27 @@ accessed. Python regular expressions are accepted.",
                 )
 
         # 3. Match the **kwargs, if any.
-        if node.kwargs:
+        # CallSite unpacks literal ``**{...}`` operands into keyword_arguments
+        # in step 2. We therefore only assume **kwargs covers the remaining
+        # named and keyword-only parameters when its full key set is not
+        # statically provable: the enclosing scope forwards a variadic kwarg
+        # without context (``def wrap(**kw): f(**kw)``), or at least one
+        # ``**operand`` is not a literal Dict (Name, Call, subscript, ...).
+        # A name bound to a dict literal is not enough, the dict can be
+        # filled after its creation (``d["y"] = ...``, see #10029). A literal
+        # ``f(**{"y": ...})`` keeps the gate closed and lets
+        # ``no-value-for-parameter`` and ``missing-kwoa`` fire (see #8785).
+        kwargs_might_supply_more = any(
+            not isinstance(kw.value, nodes.Dict) for kw in node.kwargs
+        )
+        if node.kwargs and (
+            has_no_context_keywords_variadic or kwargs_might_supply_more
+        ):
             for i, [(name, _defval), _assigned] in enumerate(parameters):
-                # Assume that *kwargs provides values for all remaining
-                # unassigned named parameters.
                 if name is not None:
                     parameters[i] = (parameters[i][0], True)
-                else:
-                    # **kwargs can't assign to tuples.
-                    pass
+            for kwparam in kwparams.values():
+                kwparam[1] = True
 
         # Check that any parameters without a default have been assigned
         # values.
@@ -1795,6 +1830,7 @@ accessed. Python regular expressions are accepted.",
         if not func.decorators:
             return False
 
+        has_signature_changing_decorator = False
         for decorator in func.decorators.nodes:
             inferred = safe_infer(decorator)
 
@@ -1807,12 +1843,24 @@ accessed. Python regular expressions are accepted.",
             if not isinstance(inferred, nodes.FunctionDef):
                 return False
 
+            if _returns_first_argument(inferred):
+                # A pass-through decorator leaves the signature unchanged
+                continue
+
+            has_signature_changing_decorator = True
             try:
                 return_values = list(inferred.infer_call_result(caller=None))
             except InferenceError:
                 return False
 
+            if all(isinstance(value, util.UninferableBase) for value in return_values):
+                # An opaque decorator may return a wrapper that accepts the keyword
+                return True
+
             for return_value in return_values:
+                if isinstance(return_value, util.UninferableBase):
+                    continue
+
                 # infer_call_result() returns nodes.Const.None for None return values
                 # so this also catches non-returning decorators
                 if not isinstance(return_value, nodes.FunctionDef):
@@ -1828,7 +1876,7 @@ accessed. Python regular expressions are accepted.",
 
                 return False
 
-        return True
+        return has_signature_changing_decorator
 
     def _check_invalid_sequence_index(self, subscript: nodes.Subscript) -> None:
         # Look for index operations where the parent is a sequence type.
@@ -2091,6 +2139,17 @@ accessed. Python regular expressions are accepted.",
                             inferred_name = inferred.pytype().rsplit(".", 1)[-1]
                         self.add_message(
                             "not-context-manager", node=node, args=(inferred_name,)
+                        )
+                    except AttributeError:
+                        # Some inferred results (e.g. a TypeVar bound by a
+                        # `type` statement) are not class-like nodes and have
+                        # no ``getattr``: they can never be context managers,
+                        # so report ``not-context-manager`` with the inferred
+                        # type's name instead of crashing.
+                        self.add_message(
+                            "not-context-manager",
+                            node=node,
+                            args=(inferred.pytype().rsplit(".", 1)[-1],),
                         )
 
     @only_required_for_messages("invalid-unary-operand-type")

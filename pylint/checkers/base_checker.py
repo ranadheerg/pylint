@@ -16,7 +16,7 @@ from astroid import nodes
 from pylint.config.arguments_provider import _ArgumentsProvider
 from pylint.constants import _MSG_ORDER, MAIN_CHECKER_NAME, WarningScope
 from pylint.exceptions import InvalidMessageError
-from pylint.interfaces import UNDEFINED, Confidence
+from pylint.interfaces import UNDEFINED, Confidence, _confidence_or_undefined
 from pylint.message.message_definition import MessageDefinition
 from pylint.typing import (
     ExtraMessageOptions,
@@ -26,6 +26,7 @@ from pylint.typing import (
     ReportsCallable,
 )
 from pylint.utils import get_rst_section, get_rst_title
+from pylint.utils.utils import _escape_rst_backslashes
 
 if TYPE_CHECKING:
     from pylint.lint import PyLinter
@@ -136,7 +137,8 @@ class BaseChecker(_ArgumentsProvider):
                 msgs.items(), key=lambda kv: (_MSG_ORDER.index(kv[0][0]), kv[0])
             ):
                 msg_def = self.create_message_definition_from_tuple(msgid, msg)
-                result += f"{msg_def.format_help(checkerref=False)}\n"
+                msg_help = msg_def.format_help(checkerref=False)
+                result += f"{_escape_rst_backslashes(msg_help)}\n"
             result += "\n"
         if reports:
             result += get_rst_title(f"{checker_title} Reports", "^")
@@ -152,11 +154,12 @@ class BaseChecker(_ArgumentsProvider):
         line: int | None = None,
         node: nodes.NodeNG | None = None,
         args: Any = None,
-        confidence: Confidence = UNDEFINED,
+        confidence: Confidence | None = UNDEFINED,
         col_offset: int | None = None,
         end_lineno: int | None = None,
         end_col_offset: int | None = None,
     ) -> None:
+        confidence = _confidence_or_undefined(confidence, stacklevel=2)
         self.linter.add_message(
             msgid, line, node, args, confidence, col_offset, end_lineno, end_col_offset
         )

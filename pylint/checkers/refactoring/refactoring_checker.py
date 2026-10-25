@@ -22,6 +22,7 @@ from pylint import checkers
 from pylint.checkers import utils
 from pylint.checkers.base.basic_error_checker import _loop_exits_early
 from pylint.checkers.utils import node_frame_class, truncated_dict_suggestion
+from pylint.constants import WarningScope
 from pylint.graph import get_cycles, get_paths
 from pylint.interfaces import HIGH, INFERENCE, Confidence
 
@@ -420,6 +421,7 @@ class RefactoringChecker(checkers.BaseTokenChecker):
             "According to PEP479, the raise of StopIteration to end the loop of "
             "a generator may lead to hard to find bugs. This PEP specify that "
             "raise StopIteration has to be replaced by a simple return statement",
+            {"scope": WarningScope.NODE},
         ),
         "R1710": (
             "Either all return statements in a function should return an expression, "
@@ -877,6 +879,8 @@ class RefactoringChecker(checkers.BaseTokenChecker):
         for name in node.target.nodes_of_class(nodes.AssignName):
             self._check_redefined_argument_from_local(name)
 
+    visit_asyncfor = visit_for
+
     @utils.only_required_for_messages("redefined-argument-from-local")
     def visit_excepthandler(self, node: nodes.ExceptHandler) -> None:
         if node.name and isinstance(node.name, nodes.AssignName):
@@ -899,6 +903,8 @@ class RefactoringChecker(checkers.BaseTokenChecker):
                 continue
             for name in names.nodes_of_class(nodes.AssignName):
                 self._check_redefined_argument_from_local(name)
+
+    visit_asyncwith = visit_with
 
     def _check_superfluous_else(
         self,

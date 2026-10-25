@@ -14,9 +14,8 @@ from astroid import nodes
 
 from pylint.checkers import BaseChecker
 from pylint.checkers.utils import (
+    is_module_member,
     only_required_for_messages,
-    safe_infer,
-    uninferable_final_decorators,
 )
 from pylint.interfaces import HIGH
 
@@ -73,6 +72,12 @@ class UnsupportedVersionChecker(BaseChecker):
             "Used when the py-version set by the user is lower than 3.15 and pylint encounters "
             "the ``*`` or ``**`` unpacking added by PEP 798 in a comprehension.",
         ),
+        "W2608": (
+            "Lazy imports are not supported by all versions included in the py-version setting",
+            "using-lazy-import-in-unsupported-version",
+            "Used when the py-version set by the user is lower than 3.15 and pylint encounters "
+            "the ``lazy`` import added by PEP 810.",
+        ),
     }
 
     def open(self) -> None:
@@ -122,13 +127,13 @@ class UnsupportedVersionChecker(BaseChecker):
         if self._py38_plus:
             return
 
-        decorators = []
-        for decorator in node.get_children():
-            inferred = safe_infer(decorator)
-            if inferred and inferred.qname() == "typing.final":
-                decorators.append(decorator)
+        decorators = [
+            decorator
+            for decorator in node.get_children()
+            if is_module_member(decorator, "typing.final")
+        ]
 
-        for decorator in decorators or uninferable_final_decorators(node):
+        for decorator in decorators:
             self.add_message(
                 "using-final-decorator-in-unsupported-version",
                 node=decorator,
@@ -232,6 +237,25 @@ class UnsupportedVersionChecker(BaseChecker):
         if not self._py315_plus and isinstance(node.key, nodes.DictUnpack):
             self.add_message(
                 "using-comprehension-unpacking-in-unsupported-version",
+                node=node,
+                confidence=HIGH,
+            )
+
+    @only_required_for_messages("using-lazy-import-in-unsupported-version")
+    def visit_import(self, node: nodes.Import) -> None:
+        self._check_lazy_import(node)
+
+    @only_required_for_messages("using-lazy-import-in-unsupported-version")
+    def visit_importfrom(self, node: nodes.ImportFrom) -> None:
+        self._check_lazy_import(node)
+
+    def _check_lazy_import(self, node: nodes.Import | nodes.ImportFrom) -> None:
+        """Add a message for ``lazy import elements`` when the py-version is
+        lower than 3.15.
+        """
+        if not self._py315_plus and node.is_lazy:
+            self.add_message(
+                "using-lazy-import-in-unsupported-version",
                 node=node,
                 confidence=HIGH,
             )
